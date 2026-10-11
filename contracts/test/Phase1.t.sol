@@ -7,11 +7,15 @@ import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {LendingPool} from "../src/lending/LendingPool.sol";
 import {LoanManager} from "../src/lending/LoanManager.sol";
 import {ILendingPool} from "../src/interfaces/ILendingPool.sol";
+import {CreditPassport} from "../src/credit/CreditPassport.sol";
+import {RiskEngine} from "../src/risk/RiskEngine.sol";
 
 contract Phase1Test is Test {
     MockERC20 private token;
     LendingPool private pool;
     LoanManager private manager;
+    CreditPassport private passport;
+    RiskEngine private riskEngine;
 
     address private lender = makeAddr("lender");
     address private borrower = makeAddr("borrower");
@@ -22,9 +26,15 @@ contract Phase1Test is Test {
 
     function setUp() public {
         token = new MockERC20("Test Token", "TST", address(this));
+        passport = new CreditPassport(address(this));
+        riskEngine = new RiskEngine(passport, address(this));
         pool = new LendingPool(token, address(this));
-        manager = new LoanManager(pool, token);
+        manager = new LoanManager(pool, token, riskEngine);
         pool.setLoanManager(address(manager));
+        passport.setCreditUpdater(address(this), true);
+        vm.prank(borrower);
+        passport.registerPassport();
+        passport.updateProfile(borrower, 800, 3);
 
         token.mint(lender, LIQUIDITY);
         token.mint(borrower, COLLATERAL);
@@ -205,10 +215,10 @@ contract Phase1Test is Test {
         new LendingPool(token, address(0));
 
         vm.expectRevert(LoanManager.InvalidAddress.selector);
-        new LoanManager(ILendingPool(address(0)), token);
+        new LoanManager(ILendingPool(address(0)), token, riskEngine);
 
         vm.expectRevert(LoanManager.InvalidAddress.selector);
-        new LoanManager(pool, MockERC20(address(0)));
+        new LoanManager(pool, MockERC20(address(0)), riskEngine);
 
         LendingPool freshPool = new LendingPool(token, address(this));
         vm.expectRevert(LendingPool.InvalidAddress.selector);
@@ -241,9 +251,15 @@ contract Phase1Test is Test {
 
     function testFeeOnTransferUsesActualReceivedAmounts() public {
         FeeOnTransferToken feeToken = new FeeOnTransferToken();
+        CreditPassport feePassport = new CreditPassport(address(this));
+        RiskEngine feeRiskEngine = new RiskEngine(feePassport, address(this));
         LendingPool feePool = new LendingPool(feeToken, address(this));
-        LoanManager feeManager = new LoanManager(feePool, feeToken);
+        LoanManager feeManager = new LoanManager(feePool, feeToken, feeRiskEngine);
         feePool.setLoanManager(address(feeManager));
+        feePassport.setCreditUpdater(address(this), true);
+        vm.prank(borrower);
+        feePassport.registerPassport();
+        feePassport.updateProfile(borrower, 800, 3);
 
         feeToken.mint(lender, LIQUIDITY);
         feeToken.mint(borrower, COLLATERAL);
